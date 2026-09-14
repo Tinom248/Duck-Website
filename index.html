@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Sicherheitsüberprüfung</title>
+<style>
+  :root{
+    --bg:#0f1115;
+    --card:#ffffff;
+    --accent:#1a73e8;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;
+    padding:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:var(--bg);
+    font-family:Arial, Helvetica, sans-serif;
+  }
+
+  /* ---------- Verifizierungs-Overlay ---------- */
+  #gate{
+    position:fixed;
+    inset:0;
+    background:#202124;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:9999;
+    transition:opacity .5s ease;
+  }
+  #captcha-box{
+    background:var(--card);
+    width:360px;
+    max-width:90vw;
+    border-radius:6px;
+    box-shadow:0 4px 20px rgba(0,0,0,.4);
+    padding:20px 24px 24px;
+  }
+  #captcha-box h2{
+    font-size:16px;
+    margin:0 0 4px;
+    color:#202124;
+  }
+  #captcha-box p{
+    font-size:12px;
+    color:#5f6368;
+    margin:0 0 16px;
+  }
+  .checkbox-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    border:1px solid #d3d3d3;
+    border-radius:4px;
+    padding:14px 16px;
+    cursor:pointer;
+    user-select:none;
+    transition:box-shadow .2s;
+  }
+  .checkbox-row:hover{ box-shadow:0 0 0 2px rgba(26,115,232,.15); }
+  .fake-check{
+    width:26px;
+    height:26px;
+    border:2px solid #c1c1c1;
+    border-radius:3px;
+    flex-shrink:0;
+    position:relative;
+    transition:background .15s, border-color .15s;
+  }
+  .fake-check.checked{
+    background:var(--accent);
+    border-color:var(--accent);
+  }
+  .fake-check.checked::after{
+    content:"";
+    position:absolute;
+    left:8px; top:3px;
+    width:7px; height:13px;
+    border:solid white;
+    border-width:0 3px 3px 0;
+    transform:rotate(45deg);
+  }
+  .checkbox-row span.label{
+    font-size:14px;
+    color:#3c4043;
+  }
+  #verify-btn{
+    margin-top:18px;
+    width:100%;
+    padding:10px;
+    background:var(--accent);
+    color:#fff;
+    border:none;
+    border-radius:4px;
+    font-size:14px;
+    cursor:pointer;
+    opacity:.5;
+    pointer-events:none;
+    transition:opacity .2s;
+  }
+  #verify-btn.active{
+    opacity:1;
+    pointer-events:auto;
+  }
+  #verify-btn:hover.active{ background:#1558b0; }
+
+  .loader{
+    display:none;
+    text-align:center;
+    font-size:12px;
+    color:#5f6368;
+    margin-top:12px;
+  }
+  .loader.show{ display:block; }
+  .spinner{
+    display:inline-block;
+    width:14px;height:14px;
+    border:2px solid #ddd;
+    border-top-color:var(--accent);
+    border-radius:50%;
+    animation:spin .7s linear infinite;
+    vertical-align:middle;
+    margin-right:6px;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* ---------- Entenchaos ---------- */
+  #duckworld{
+    position:fixed;
+    inset:0;
+    background:#87ceeb;
+    overflow:hidden;
+    display:none;
+  }
+  #duckworld.glitching{
+    animation:screenshake .15s infinite;
+  }
+  @keyframes screenshake{
+    0%{ transform:translate(0,0); }
+    20%{ transform:translate(-6px,3px) rotate(-0.3deg); }
+    40%{ transform:translate(5px,-4px) rotate(0.3deg); }
+    60%{ transform:translate(-4px,-2px); }
+    80%{ transform:translate(6px,2px); }
+    100%{ transform:translate(0,0); }
+  }
+  .duck{
+    position:absolute;
+    font-size:40px;
+    animation-name:fall;
+    animation-timing-function:linear;
+    animation-iteration-count:infinite;
+    user-select:none;
+    filter:drop-shadow(0 2px 2px rgba(0,0,0,.3));
+  }
+  @keyframes fall{
+    from{ transform:translateY(-10vh) rotate(0deg); }
+    to{ transform:translateY(110vh) rotate(360deg); }
+  }
+  #bigtext{
+    position:fixed;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    font-size:min(12vw,90px);
+    font-weight:900;
+    color:#fff;
+    text-shadow:3px 3px 0 #ff6f00, -3px -3px 0 #ff6f00, 0 0 20px rgba(0,0,0,.5);
+    z-index:5;
+    text-align:center;
+    pointer-events:none;
+    animation:pulse .6s ease-in-out infinite alternate;
+  }
+  @keyframes pulse{
+    from{ transform:translate(-50%,-50%) scale(1); }
+    to{ transform:translate(-50%,-50%) scale(1.08); }
+  }
+
+  /* ---------- glitch flash overlay ---------- */
+  #glitchflash{
+    position:fixed;
+    inset:0;
+    z-index:20;
+    pointer-events:none;
+    mix-blend-mode:difference;
+    opacity:0;
+  }
+  #glitchflash.on{
+    opacity:1;
+    animation:flashcolor .08s steps(1) infinite;
+  }
+  @keyframes flashcolor{
+    0%{ background:#ff00ff; }
+    33%{ background:#00ffff; }
+    66%{ background:#ffff00; }
+    100%{ background:#ff0000; }
+  }
+
+  #scanlines{
+    position:fixed;
+    inset:0;
+    z-index:15;
+    pointer-events:none;
+    background:repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0.12) 0px,
+      rgba(0,0,0,0.12) 1px,
+      transparent 2px,
+      transparent 4px
+    );
+    display:none;
+  }
+
+  #matrix{
+    position:fixed;
+    inset:0;
+    z-index:4;
+    pointer-events:none;
+    opacity:.55;
+    display:none;
+  }
+
+  @keyframes jitter{
+    0%{ transform:translate(0,0); }
+    25%{ transform:translate(1px,-1px); }
+    50%{ transform:translate(-1px,1px); }
+    75%{ transform:translate(1px,1px); }
+    100%{ transform:translate(0,0); }
+  }
+
+  /* ---------- Fake Fehler-Popups ---------- */
+  .errbox{
+    position:fixed;
+    width:300px;
+    background:#ece9d8;
+    border:2px solid #0a246a;
+    border-radius:4px;
+    box-shadow:4px 4px 14px rgba(0,0,0,.6);
+    z-index:30;
+    font-family:Tahoma, Arial, sans-serif;
+    font-size:12px;
+    animation:jitter .12s infinite;
+    user-select:none;
+  }
+  .errbox .titlebar{
+    background:linear-gradient(to right, #0a246a, #a6caf0);
+    color:#fff;
+    font-weight:bold;
+    padding:4px 6px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    cursor:default;
+    border-radius:2px 2px 0 0;
+  }
+  .errbox .titlebar button{
+    background:#c75050;
+    color:#fff;
+    border:1px solid #7a0000;
+    width:18px;height:16px;
+    font-size:10px;
+    line-height:1;
+    cursor:pointer;
+  }
+  .errbox .body{
+    padding:12px 10px;
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    color:#000;
+  }
+  .errbox .body .icon{
+    font-size:26px;
+  }
+  .errbox .body .msg{
+    flex:1;
+  }
+  .errbox .footer{
+    padding:6px 10px 10px;
+    text-align:right;
+  }
+  .errbox .footer button{
+    background:#ece9d8;
+    border:1px solid #808080;
+    padding:3px 14px;
+    font-size:11px;
+    cursor:pointer;
+  }
+  .errbox .footer button:hover{ background:#dcdcdc; }
+
+  /* ---------- Fake "Hacker"-Terminal ---------- */
+  #terminal{
+    position:fixed;
+    top:8vh;
+    left:50%;
+    transform:translateX(-50%);
+    width:min(560px, 90vw);
+    background:rgba(0,0,0,.88);
+    border:1px solid #0f0;
+    color:#0f0;
+    font-family:"Courier New", monospace;
+    font-size:13px;
+    line-height:1.5;
+    padding:14px 16px;
+    z-index:25;
+    box-shadow:0 0 25px rgba(0,255,0,.4);
+    white-space:pre-wrap;
+    display:none;
+    max-height:40vh;
+    overflow:hidden;
+  }
+
+  #hackedbanner{
+    position:fixed;
+    top:0; left:0; right:0;
+    background:#b00000;
+    color:#fff;
+    font-family:"Courier New", monospace;
+    font-weight:bold;
+    text-align:center;
+    padding:10px 4px;
+    font-size:min(5vw,24px);
+    letter-spacing:2px;
+    z-index:26;
+    display:none;
+    animation:jitter .1s infinite;
+  }
+
+  /* ---------- Notausgang ---------- */
+  #panic{
+    position:fixed;
+    bottom:8px;
+    right:8px;
+    z-index:99999;
+    background:rgba(0,0,0,.55);
+    color:#fff;
+    font-size:11px;
+    padding:6px 10px;
+    border-radius:4px;
+    cursor:pointer;
+    opacity:.35;
+    transition:opacity .2s;
+  }
+  #panic:hover{ opacity:1; }
+</style>
+</head>
+<body>
+
+<!-- ===================== VERIFIZIERUNG ===================== -->
+<div id="gate">
+  <div id="captcha-box">
+    <h2>Sicherheitsüberprüfung</h2>
+    <p>Bitte bestätige, dass du kein Roboter bist, um fortzufahren.</p>
+    <div class="checkbox-row" id="checkbox-row">
+      <div class="fake-check" id="fake-check"></div>
+      <span class="label">Ich bin kein Roboter</span>
+    </div>
+    <div class="loader" id="loader"><span class="spinner"></span>Überprüfung läuft …</div>
+    <button id="verify-btn">Bestätigen</button>
+  </div>
+</div>
+
+<!-- ===================== ENTENCHAOS ===================== -->
+<div id="hackedbanner">⚠ DU WURDEST VON ENTEN GEHACKT ⚠</div>
+<canvas id="matrix"></canvas>
+<div id="duckworld">
+  <div id="bigtext">🦆 QUAK QUAK QUAK 🦆</div>
+</div>
+<div id="terminal"></div>
+<div id="scanlines"></div>
+<div id="glitchflash"></div>
+<div id="panic" title="Alles stoppen (ESC)">⏹ Panik-Knopf (alles ist nur Spaß, nichts ist echt)</div>
+
+<script>
+  const checkboxRow = document.getElementById('checkbox-row');
+  const fakeCheck   = document.getElementById('fake-check');
+  const verifyBtn   = document.getElementById('verify-btn');
+  const loader      = document.getElementById('loader');
+  const gate        = document.getElementById('gate');
+  const duckworld   = document.getElementById('duckworld');
+  const glitchflash = document.getElementById('glitchflash');
+  const scanlines   = document.getElementById('scanlines');
+  const panic       = document.getElementById('panic');
+  const terminal    = document.getElementById('terminal');
+  const hackedbanner= document.getElementById('hackedbanner');
+  const matrixCanvas= document.getElementById('matrix');
+
+  let checked = false;
+  let chaosRunning = false;
+  let intervals = [];
+  let timeouts = [];
+  let audioCtx = null;
+  let matrixLoopId = null;
+
+  checkboxRow.addEventListener('click', () => {
+    if (checked) return;
+    checked = true;
+    loader.classList.add('show');
+    setTimeout(() => {
+      fakeCheck.classList.add('checked');
+      loader.classList.remove('show');
+      verifyBtn.classList.add('active');
+    }, 800);
+  });
+
+  verifyBtn.addEventListener('click', () => {
+    if (!verifyBtn.classList.contains('active')) return;
+    gate.style.opacity = '0';
+    setTimeout(() => {
+      gate.style.display = 'none';
+      startDuckChaos();
+    }, 500);
+  });
+
+  const errorTitles = [
+    "ENTEN32.DLL", "Kritischer Systemfehler", "DUCK_OVERFLOW", "System32\\quak.exe",
+    "Warnung", "Achtung!!!", "Fataler Fehler 0xDUCK", "Speicherzugriffsfehler",
+    "REMOTE_ACCESS.EXE", "Firewall deaktiviert"
+  ];
+  const errorMsgs = [
+    "Zu viele Enten im Arbeitsspeicher. Programm reagiert nicht mehr.",
+    "quak.exe hat aufgehört zu funktionieren. Windows sucht nach einer Lösung...",
+    "Es wurden 9999 nicht identifizierte Enten erkannt.",
+    "Fehler: Ente konnte nicht geladen werden (Code QUAK-404).",
+    "Ihr System ist zu 87% mit Federn bedeckt.",
+    "Diese Website wurde von Enten übernommen.",
+    "WARNUNG: Rückkehr zur Normalität nicht mehr garantiert.",
+    "Unerwarteter Schnabel-Interrupt im Kernel.",
+    "Zu viel Gequake. Bitte Lautstärke ignorieren.",
+    "Ente.exe versucht, die Kontrolle zu übernehmen.",
+    "Verbindung zu einem unbekannten Entenserver hergestellt.",
+    "Zugriff auf Mikrofon durch Enten angefordert."
+  ];
+
+  let popupCount = 0;
+  const MAX_POPUPS = 40;
+
+  function spawnPopup(){
+    if (!chaosRunning) return;
+    if (popupCount >= MAX_POPUPS) return;
+    popupCount++;
+
+    const box = document.createElement('div');
+    box.className = 'errbox';
+    const w = 260 + Math.random()*80;
+    box.style.width = w + 'px';
+    const maxLeft = Math.max(0, window.innerWidth - w - 20);
+    const maxTop  = Math.max(0, window.innerHeight - 140);
+    box.style.left = (Math.random()*maxLeft) + 'px';
+    box.style.top  = (Math.random()*maxTop) + 'px';
+    box.style.animationDuration = (0.08 + Math.random()*0.1) + 's';
+
+    const title = errorTitles[Math.floor(Math.random()*errorTitles.length)];
+    const msg   = errorMsgs[Math.floor(Math.random()*errorMsgs.length)];
+    const icons = ['🦆','⚠️','🐤','💥','❌'];
+    const icon  = icons[Math.floor(Math.random()*icons.length)];
+
+    box.innerHTML = `
+      <div class="titlebar"><span>${title}</span><button class="xbtn">✕</button></div>
+      <div class="body"><span class="icon">${icon}</span><span class="msg">${msg}</span></div>
+      <div class="footer"><button class="okbtn">OK</button></div>
+    `;
+
+    document.body.appendChild(box);
+
+    function remove(){
+      box.remove();
+      popupCount--;
+      if (chaosRunning && Math.random() < 0.5){
+        spawnPopup();
+        spawnPopup();
+      }
+    }
+    box.querySelector('.xbtn').addEventListener('click', remove);
+    box.querySelector('.okbtn').addEventListener('click', remove);
+  }
+
+  // ---------- Fake Hacker-Terminal-Text ----------
+  const terminalLines = [
+    "> Verbindung zu duck-server-01.local wird hergestellt...",
+    "> Zugriff auf Kamera... [SIMULIERT]",
+    "> Enten-Datenbank wird heruntergeladen... 100%",
+    "> Passwoerter.txt wird 'verschluesselt'... (nicht wirklich)",
+    "> 9999 Enten werden freigesetzt",
+    "> Firewall: [Enten haben gewonnen]",
+    "> System status: GEQUAKT",
+    "> Dies ist nur ein Scherz-Skript, keine Sorge.",
+    "> Root-Zugriff erlangt auf: KUEHLSCHRANK.local (Spass)",
+    "> Alle Dateien sind sicher. Es passiert nichts Echtes."
+  ];
+
+  function typeTerminal(){
+    terminal.style.display = 'block';
+    terminal.textContent = '';
+    let lineIdx = 0;
+    function nextLine(){
+      if (!chaosRunning) return;
+      if (lineIdx >= terminalLines.length){ lineIdx = 0; terminal.textContent=''; }
+      terminal.textContent += terminalLines[lineIdx] + '\n';
+      lineIdx++;
+      timeouts.push(setTimeout(nextLine, 380 + Math.random()*300));
+    }
+    nextLine();
+  }
+
+  // ---------- Matrix-Regen ----------
+  function startMatrix(){
+    matrixCanvas.style.display = 'block';
+    const ctx = matrixCanvas.getContext('2d');
+    function resize(){
+      matrixCanvas.width = window.innerWidth;
+      matrixCanvas.height = window.innerHeight;
+    }
+    resize();
+    const chars = "アイウエオ0101QUACK01";
+    const fontSize = 16;
+    let columns = Math.floor(matrixCanvas.width / fontSize);
+    let drops = new Array(columns).fill(1);
+    function draw(){
+      if (!chaosRunning){ return; }
+      ctx.fillStyle = 'rgba(0,0,0,0.08)';
+      ctx.fillRect(0,0,matrixCanvas.width, matrixCanvas.height);
+      ctx.fillStyle = '#0f0';
+      ctx.font = fontSize + 'px monospace';
+      for (let i=0;i<drops.length;i++){
+        const text = chars[Math.floor(Math.random()*chars.length)];
+        ctx.fillText(text, i*fontSize, drops[i]*fontSize);
+        if (drops[i]*fontSize > matrixCanvas.height && Math.random() > 0.975){
+          drops[i] = 0;
+        }
+        drops[i]++;
+      }
+      matrixLoopId = requestAnimationFrame(draw);
+    }
+    draw();
+  }
+
+  function startDuckChaos(){
+    chaosRunning = true;
+    duckworld.style.display = 'block';
+    duckworld.classList.add('glitching');
+    scanlines.style.display = 'block';
+    glitchflash.classList.add('on');
+    startMatrix();
+    typeTerminal();
+
+    timeouts.push(setTimeout(() => {
+      hackedbanner.style.display = 'block';
+    }, 1200));
+
+    setTimeout(() => glitchflash.classList.remove('on'), 400);
+    intervals.push(setInterval(() => {
+      if (!chaosRunning) return;
+      if (Math.random() < 0.15){
+        glitchflash.classList.add('on');
+        setTimeout(() => glitchflash.classList.remove('on'), 90);
+      }
+    }, 300));
+
+    const DUCK_COUNT = 250;
+    const emojis = ['🦆','🐤','🐥'];
+    for (let i = 0; i < DUCK_COUNT; i++){
+      const duck = document.createElement('div');
+      duck.className = 'duck';
+      duck.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+      const left = Math.random()*100;
+      const size = 24 + Math.random()*46;
+      const duration = 2 + Math.random()*4;
+      const delay = Math.random()*4;
+      duck.style.left = left+'vw';
+      duck.style.fontSize = size+'px';
+      duck.style.animationDuration = duration+'s';
+      duck.style.animationDelay = '-' + delay + 's';
+      duckworld.appendChild(duck);
+    }
+
+    intervals.push(setInterval(() => {
+      if (!chaosRunning) return;
+      spawnPopup();
+    }, 350));
+    for (let i=0;i<6;i++) timeouts.push(setTimeout(spawnPopup, i*120));
+
+    const titles = ["⚠️ GEHACKT", "QUAK QUAK", "🦆🦆🦆", "SYSTEM ÜBERLASTET", "VERBINDUNG UNSICHER"];
+    intervals.push(setInterval(() => {
+      if (!chaosRunning) return;
+      document.title = titles[Math.floor(Math.random()*titles.length)];
+    }, 500));
+
+    startAudio();
+  }
+
+  // ---------- Audio: mehrere Schichten gleichzeitig ----------
+  function startAudio(){
+    try{
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const master = audioCtx.createGain();
+      master.gain.value = 0.9;
+      master.connect(audioCtx.destination);
+
+      // Schicht 1: Enten-Quaken
+      function quack(time, freqStart, freqEnd, dur){
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freqStart, time);
+        osc.frequency.exponentialRampToValueAtTime(freqEnd, time+dur);
+        gain.gain.setValueAtTime(0.0001, time);
+        gain.gain.exponentialRampToValueAtTime(0.8, time+0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time+dur);
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(time);
+        osc.stop(time+dur);
+      }
+      function quackLoop(){
+        if (!chaosRunning) return;
+        const now = audioCtx.currentTime;
+        let t = now;
+        for (let i=0;i<8;i++){
+          const dur = 0.18 + Math.random()*0.15;
+          quack(t, 300+Math.random()*300, 120+Math.random()*100, dur);
+          t += dur + Math.random()*0.15;
+        }
+        timeouts.push(setTimeout(quackLoop, (t-now)*1000));
+      }
+      quackLoop();
+
+      // Schicht 2: Alarm-Sirene (auf und ab)
+      const sirenOsc = audioCtx.createOscillator();
+      const sirenGain = audioCtx.createGain();
+      sirenOsc.type = 'sine';
+      sirenGain.gain.value = 0.35;
+      sirenOsc.connect(sirenGain);
+      sirenGain.connect(master);
+      sirenOsc.start();
+      function sirenSweep(){
+        if (!chaosRunning){ try{ sirenOsc.stop(); }catch(e){} return; }
+        const now = audioCtx.currentTime;
+        sirenOsc.frequency.cancelScheduledValues(now);
+        sirenOsc.frequency.setValueAtTime(500, now);
+        sirenOsc.frequency.linearRampToValueAtTime(1200, now+0.5);
+        sirenOsc.frequency.linearRampToValueAtTime(500, now+1.0);
+        timeouts.push(setTimeout(sirenSweep, 1000));
+      }
+      sirenSweep();
+
+      // Schicht 3: schnelles Alarm-Piepen
+      function beep(time){
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = 1800;
+        gain.gain.setValueAtTime(0.0001, time);
+        gain.gain.exponentialRampToValueAtTime(0.5, time+0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time+0.08);
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(time);
+        osc.stop(time+0.1);
+      }
+      function beepLoop(){
+        if (!chaosRunning) return;
+        beep(audioCtx.currentTime);
+        timeouts.push(setTimeout(beepLoop, 220 + Math.random()*180));
+      }
+      beepLoop();
+
+      // Schicht 4: weisses Rauschen / "Static" fuer kaputten Signal-Effekt
+      const bufferSize = 2 * audioCtx.sampleRate;
+      const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i=0;i<bufferSize;i++){ output[i] = Math.random()*2-1; }
+      const noiseSource = audioCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+      noiseSource.loop = true;
+      const noiseGain = audioCtx.createGain();
+      noiseGain.gain.value = 0.05;
+      noiseSource.connect(noiseGain);
+      noiseGain.connect(master);
+      noiseSource.start();
+      intervals.push(setInterval(() => {
+        if (!chaosRunning) return;
+        noiseGain.gain.setTargetAtTime(0.05 + Math.random()*0.2, audioCtx.currentTime, 0.02);
+      }, 150));
+
+      // Schicht 5: tiefer bedrohlicher Puls
+      const pulseOsc = audioCtx.createOscillator();
+      const pulseGain = audioCtx.createGain();
+      pulseOsc.type = 'triangle';
+      pulseOsc.frequency.value = 60;
+      pulseGain.gain.value = 0;
+      pulseOsc.connect(pulseGain);
+      pulseGain.connect(master);
+      pulseOsc.start();
+      function pulse(){
+        if (!chaosRunning){ try{ pulseOsc.stop(); }catch(e){} return; }
+        const now = audioCtx.currentTime;
+        pulseGain.gain.cancelScheduledValues(now);
+        pulseGain.gain.setValueAtTime(0.4, now);
+        pulseGain.gain.exponentialRampToValueAtTime(0.001, now+0.4);
+        timeouts.push(setTimeout(pulse, 500));
+      }
+      pulse();
+
+    }catch(e){
+      console.warn('Audio konnte nicht gestartet werden:', e);
+    }
+  }
+
+  function stopChaos(){
+    chaosRunning = false;
+    intervals.forEach(clearInterval);
+    timeouts.forEach(clearTimeout);
+    intervals = [];
+    timeouts = [];
+    if (matrixLoopId) cancelAnimationFrame(matrixLoopId);
+    document.querySelectorAll('.errbox').forEach(b => b.remove());
+    popupCount = 0;
+    duckworld.classList.remove('glitching');
+    glitchflash.classList.remove('on');
+    scanlines.style.display = 'none';
+    matrixCanvas.style.display = 'none';
+    terminal.style.display = 'none';
+    hackedbanner.style.display = 'none';
+    document.title = 'Sicherheitsüberprüfung';
+    if (audioCtx){ audioCtx.close(); audioCtx = null; }
+  }
+
+  panic.addEventListener('click', stopChaos);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') stopChaos();
+  });
+</script>
+
+</body>
+</html>
